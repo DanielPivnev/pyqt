@@ -7,7 +7,7 @@ import logging
 import threading
 import messenger.logs.client_log_config
 from messenger.common.settings import ACTION, EXIT, TIME, ACCOUNT_NAME, MESSAGE, SENDER, DESTINATION, MESSAGE_TEXT, \
-    PRESENCE, USER, RESPONSE, DEFAULT_IP_ADDR, DEFAULT_PORT, ERROR
+    PRESENCE, USER, RESPONSE, DEFAULT_IP_ADDR, DEFAULT_PORT, ERROR, PASSWORD
 from messenger.common.utils import send_message, get_message
 from messenger.common.errors import IncorrectDataRecivedError, ReqFieldMissingError, ServerError
 from messenger.common.decos import log
@@ -99,12 +99,13 @@ class ClientReader(threading.Thread, metaclass=ClientVerifier):
 
 
 @log
-def create_presence(account_name):
+def create_presence(account_name, password):
     out = {
         ACTION: PRESENCE,
         TIME: time.time(),
         USER: {
-            ACCOUNT_NAME: account_name
+            ACCOUNT_NAME: account_name,
+            PASSWORD: password
         }
     }
     logger.debug(f'Сформировано {PRESENCE} сообщение для пользователя {account_name}')
@@ -150,6 +151,7 @@ def main():
 
     if not client_name:
         client_name = input('Введите имя пользователя: ')
+        client_password = input('Введите пороль: ')
     else:
         print(f'Клиентский модуль запущен с именем: {client_name}')
 
@@ -160,7 +162,7 @@ def main():
     try:
         transport = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         transport.connect((server_address, server_port))
-        send_message(transport, create_presence(client_name))
+        send_message(transport, create_presence(client_name, client_password))
         answer = process_response_ans(get_message(transport))
         logger.info(f'Установлено соединение с сервером. Ответ сервера: {answer}')
         print(f'Установлено соединение с сервером.')

@@ -11,6 +11,8 @@ DEFAULT_MAX_PACKAGE_LENGTH = 1024
 
 DEFAULT_ENCODING = 'utf-8'
 
+SERVER_DATABASE = 'sqlite:///server.sqlite'
+
 ACTION = 'action'
 TIME = 'time'
 USER = 'user'
@@ -18,6 +20,7 @@ SENDER = 'sender'
 DESTINATION = 'destination'
 
 ACCOUNT_NAME = 'account_name'
+PASSWORD = 'password'
 
 PRESENCE = 'presence'
 MESSAGE = 'message'
