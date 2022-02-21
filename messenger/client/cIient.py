@@ -129,11 +129,13 @@ def arg_parser():
     parser.add_argument('addr', default=DEFAULT_IP_ADDR, nargs='?')
     parser.add_argument('port', default=DEFAULT_PORT, type=int, nargs='?')
     parser.add_argument('-n', '--name', default=None, nargs='?')
+    parser.add_argument('-p', '--password', default=None, nargs='?')
+
     namespace = parser.parse_args(sys.argv[1:])
     server_address = namespace.addr
-
     server_port = namespace.port
     client_name = namespace.name
+    client_password = namespace.password
 
     if not 1023 < server_port < 65536:
         logger.critical(
@@ -141,15 +143,15 @@ def arg_parser():
             f'Клиент завершается.')
         exit(1)
 
-    return server_address, server_port, client_name
+    return server_address, server_port, client_name, client_password
 
 
 def main():
     print('Консольный месседжер. Клиентский модуль.')
 
-    server_address, server_port, client_name = arg_parser()
+    server_address, server_port, client_name, client_password = arg_parser()
 
-    if not client_name:
+    while not client_name and not client_password:
         client_name = input('Введите имя пользователя: ')
         client_password = input('Введите пороль: ')
     else:
