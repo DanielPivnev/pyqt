@@ -7,7 +7,8 @@ import logging
 import threading
 import messenger.logs.client_log_config
 from messenger.common.settings import ACTION, EXIT, TIME, ACCOUNT_NAME, MESSAGE, SENDER, DESTINATION, MESSAGE_TEXT, \
-    PRESENCE, USER, RESPONSE, DEFAULT_IP_ADDR, DEFAULT_PORT, ERROR, PASSWORD
+    PRESENCE, USER, RESPONSE, DEFAULT_IP_ADDR, DEFAULT_PORT, ERROR, PASSWORD, GET_CONTACTS, ADD_CONTACT, CONTACT, \
+    REMOVE_CONTACT
 from messenger.common.utils import send_message, get_message
 from messenger.common.errors import IncorrectDataRecivedError, ReqFieldMissingError, ServerError
 from messenger.common.decos import log
@@ -22,12 +23,24 @@ class ClientSender(threading.Thread, metaclass=ClientVerifier):
         self.sock = sock
         super().__init__()
 
-    def create_exit_message(self):
-        return {
-            ACTION: EXIT,
+    def get_contacts(self):
+        message = {
+            ACTION: GET_CONTACTS,
+            USER: self.account_name,
             TIME: time.time(),
-            ACCOUNT_NAME: self.account_name
         }
+
+        send_message(self.sock, message)
+
+    def add_contact(self, contact):
+        message = {
+            ACTION: ADD_CONTACT,
+            CONTACT: contact,
+            USER: self.account_name,
+            TIME: time.time(),
+        }
+
+        send_message(self.sock, message)
 
     def create_message(self):
         to = input('Введите получателя сообщения: ')
@@ -46,6 +59,23 @@ class ClientSender(threading.Thread, metaclass=ClientVerifier):
         except OSError:
             logger.critical('Потеряно соединение с сервером.')
             exit(1)
+
+    def remove_contact(self, contact):
+        message = {
+            ACTION: REMOVE_CONTACT,
+            CONTACT: contact,
+            USER: self.account_name,
+            TIME: time.time(),
+        }
+
+        send_message(self.sock, message)
+
+    def create_exit_message(self):
+        return {
+            ACTION: EXIT,
+            TIME: time.time(),
+            ACCOUNT_NAME: self.account_name
+        }
 
     def run(self):
         self.print_help()

@@ -5,23 +5,31 @@ import logging
 import select
 import threading
 
+from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QApplication, QMessageBox
+
 from messenger.logs import server_log_config
 from messenger.common.settings import DEFAULT_PORT, DESTINATION, SENDER, USER, ACTION, ACCOUNT_NAME, PRESENCE, TIME, \
-    HTTP_200_OK, HTTP_400_BAD_REQUEST, ERROR, MESSAGE, MESSAGE_TEXT, EXIT, RESPONSE, ALERT, PASSWORD
+    HTTP_200_OK, HTTP_400_BAD_REQUEST, ERROR, MESSAGE, MESSAGE_TEXT, EXIT, RESPONSE, ALERT, PASSWORD, \
+    SERVER_DATABASE_PATH, SERVER_DATABASE_NAME, DEFAULT_LISTEN_ADDR, change_db_settings, GET_CONTACTS, \
+    HTTP_202_ACCEPTED, ADD_CONTACT, CONTACT, REMOVE_CONTACT
 from messenger.common.utils import get_message, send_message
 from messenger.common.decos import log
 from descriptors import Port
+from messenger.server.gui import MainWindow, gui_create_model, HistoryWindow, create_stat_model, ConfigWindow
 from metaclasses import ServerVerifier
 from database import ServerStorage
 
 logger = logging.getLogger('server')
+new_connection = False
+conflag_lock = threading.Lock()
 
 
 @log
 def arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', default=DEFAULT_PORT, type=int, nargs='?')
-    parser.add_argument('-a', default='', nargs='?')
+    parser.add_argument('-a', default=DEFAULT_LISTEN_ADDR, nargs='?')
     namespace = parser.parse_args(sys.argv[1:])
     listen_address = namespace.a
     listen_port = namespace.p
@@ -31,11 +39,11 @@ def arg_parser():
 class Server(threading.Thread, metaclass=ServerVerifier):
     port = Port()
 
-    def __init__(self, listen_address, listen_port, database):
+    def __init__(self, listen_address, listen_port):
         self.sock = None
         self.addr = listen_address
         self.port = listen_port
-        self.database = database
+        self.database = ServerStorage()
 
         self.clients = []
 
@@ -112,14 +120,32 @@ class Server(threading.Thread, metaclass=ServerVerifier):
                 ip_addr, port = client.getpeername()
                 self.database.user_login(message[USER][ACCOUNT_NAME], message[USER][PASSWORD], ip_addr, port)
                 send_message(client, {RESPONSE: HTTP_200_OK, ALERT: 'OK'})
+                with conflag_lock:
+                    global new_connection
+                    new_connection = True
             else:
                 response = {RESPONSE: HTTP_400_BAD_REQUEST, ERROR: 'Имя пользователя уже занято.'}
                 send_message(client, response)
                 self.clients.remove(client)
                 client.close()
+        elif ACTION in message and message[ACTION] == GET_CONTACTS and USER in message \
+                and self.names[message[USER]] == client:
+            contacts = self.database.get_contacts(message[USER])
+            response = {RESPONSE: HTTP_202_ACCEPTED, ALERT: contacts}
+            send_message(client, response)
+        elif ACTION in message and message[ACTION] == ADD_CONTACT and USER in message and CONTACT in message\
+                and self.names[message[USER]] == client:
+            self.database.add_contact(message[USER], message[CONTACT])
+            response = {RESPONSE: HTTP_200_OK, ALERT: 'OK'}
+            send_message(client, response)
         elif ACTION in message and message[ACTION] == MESSAGE and DESTINATION in message and TIME in message \
                 and SENDER in message and MESSAGE_TEXT in message:
             self.messages.append(message)
+        elif ACTION in message and message[ACTION] == REMOVE_CONTACT and USER in message and CONTACT in message \
+                and self.names[message[USER]] == client:
+            self.database.remove_contact(message[USER], message[CONTACT])
+            response = {RESPONSE: HTTP_200_OK, ALERT: 'OK'}
+            send_message(client, response)
         elif ACTION in message and message[ACTION] == EXIT and ACCOUNT_NAME in message:
             self.clients.remove(self.names[message[ACCOUNT_NAME]])
             self.names[message[ACCOUNT_NAME]].close()
@@ -131,45 +157,75 @@ class Server(threading.Thread, metaclass=ServerVerifier):
             send_message(client, response)
 
 
-def print_help():
-    print('Поддерживаемые комманды:')
-    print('users - список известных пользователей')
-    print('connected - список подключенных пользователей')
-    print('loghist - история входов пользователя')
-    print('exit - завершение работы сервера.')
-    print('help - вывод справки по поддерживаемым командам')
-
-
 def main():
     listen_address, listen_port = arg_parser()
 
-    database = ServerStorage()
-
-    server = Server(listen_address, listen_port, database)
+    server = Server(listen_address, listen_port)
     server.daemon = True
     server.start()
 
-    print_help()
+    database = server.database
 
-    while True:
-        command = input('Введите комманду: ')
-        if command == 'help':
-            print_help()
-        elif command == 'exit':
-            break
-        elif command == 'users':
-            for user in sorted(database.users_list()):
-                print(f'Пользователь {user[0]}, последний вход: {user[1]}')
-        elif command == 'connected':
-            for user in sorted(database.active_users_list()):
-                print(f'Пользователь {user[0]}, подключен: {user[1]}:{user[2]}, время установки соединения: {user[3]}')
-        elif command == 'loghist':
-            name = input(
-                'Введите имя пользователя для просмотра истории. Для вывода всей истории, просто нажмите Enter: ')
-            for user in sorted(database.users_logins_history_list(name)):
-                print(f'Пользователь: {user[0]} время входа: {user[1]}. Вход с: {user[2]}:{user[3]}')
+    app = QApplication(sys.argv)
+    gui = MainWindow()
+
+    gui.statusBar().showMessage('Server working...')
+    gui.active_clients_table.setModel(gui_create_model(database))
+    gui.active_clients_table.resizeColumnsToContents()
+    gui.active_clients_table.resizeRowsToContents()
+
+    def update_active_users():
+        global new_connection
+        if new_connection:
+            gui.active_clients_table.setModel(gui_create_model(database))
+            gui.active_clients_table.resizeColumnsToContents()
+            gui.active_clients_table.resizeRowsToContents()
+            with conflag_lock:
+                new_connection = False
+
+    def show_statistic():
+        global stat_window
+        stat_window = HistoryWindow()
+        stat_window.history_table.setModel(create_stat_model(database))
+        stat_window.history_table.resizeColumnsToContents()
+        stat_window.history_table.resizeRowsToContents()
+
+    def server_config():
+        global config_window
+        config_window = ConfigWindow()
+        config_window.db_path.insert(SERVER_DATABASE_PATH)
+        config_window.db_file.insert(SERVER_DATABASE_NAME)
+        config_window.port.insert(DEFAULT_PORT)
+        config_window.ip.insert(DEFAULT_LISTEN_ADDR)
+        config_window.save_btn.clicked.connect(save_server_config)
+
+    def save_server_config():
+        global config_window
+        message = QMessageBox()
+        path = config_window.db_path.text()
+        name = config_window.db_file.text()
+        try:
+            port = int(config_window.port.text())
+        except ValueError:
+            message.warning(config_window, 'Ошибка', 'Порт должен быть числом')
         else:
-            print('Команда не распознана.')
+            ip = config_window.ip.text()
+            if 1024 <= port <= 65535:
+                change_db_settings(path, name, port, ip)
+                message.information(config_window, 'OK', 'Настройки успешно сохранены!')
+            else:
+                message.warning(config_window, 'Ошибка', 'Порт должен быть от 1024 до 65536')
+
+    timer = QTimer()
+    timer.timeout.connect(update_active_users)
+    timer.start(1000)
+
+    gui.refresh_button.triggered.connect(update_active_users)
+    gui.show_history_button.triggered.connect(show_statistic)
+    gui.config_btn.triggered.connect(server_config)
+
+    app.exec_()
+
 
 if __name__ == '__main__':
     main()
