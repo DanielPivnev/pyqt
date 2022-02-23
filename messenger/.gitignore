@@ -1,0 +1,6 @@
+DS_STORE
+__cache__
+
+server/server.sqlite
+client/cIient2.py
+mac_launcher.py
